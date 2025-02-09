@@ -61,7 +61,7 @@ func Test_layerNode_search(t *testing.T) {
 		},
 	}
 
-	best := entry.search(2, 4, []float32{4}, EuclideanDistance)
+	best := entry.search(2, 4, BinaryString{4}, EuclideanDistance)
 
 	require.Equal(t, 5, best[0].node.Key)
 	require.Equal(t, 3, best[1].node.Key)
@@ -108,7 +108,7 @@ func TestGraph_AddSearch(t *testing.T) {
 	}, al.Topography())
 
 	nearest := g.Search(
-		[]float32{64.5},
+		BinaryString{64.5},
 		4,
 	)
 
@@ -185,7 +185,7 @@ func Benchmark_HSNW(b *testing.B) {
 			b.Run("Search", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					g.Search(
-						[]float32{float32(i % size)},
+						BinaryString{float32(i % size)},
 						4,
 					)
 				}
@@ -194,8 +194,8 @@ func Benchmark_HSNW(b *testing.B) {
 	}
 }
 
-func randFloats(n int) []float32 {
-	x := make([]float32, n)
+func randFloats(n int) BinaryString {
+	x := make(BinaryString, n)
 	for i := range x {
 		x[i] = rand.Float32()
 	}
@@ -236,7 +236,7 @@ func TestGraph_DefaultCosine(t *testing.T) {
 	)
 
 	neighbors := g.Search(
-		[]float32{0.5, 0.5},
+		BinaryString{0.5, 0.5},
 		1,
 	)
 

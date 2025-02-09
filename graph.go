@@ -8,19 +8,18 @@ import (
 	"slices"
 	"time"
 
-	"github.com/coder/hnsw/heap"
+	"github.com/fiatjaf/hamming-hnsw/heap"
+	"github.com/skull-squadron/hamming"
 	"golang.org/x/exp/maps"
 )
-
-type Vector = []float32
 
 // Node is a node in the graph.
 type Node[K cmp.Ordered] struct {
 	Key   K
-	Value Vector
+	Value BinaryString
 }
 
-func MakeNode[K cmp.Ordered](key K, vec Vector) Node[K] {
+func MakeNode[K cmp.Ordered](key K, vec BinaryString) Node[K] {
 	return Node[K]{Key: key, Value: vec}
 }
 
@@ -36,7 +35,7 @@ type layerNode[K cmp.Ordered] struct {
 
 // addNeighbor adds a o neighbor to the node, replacing the neighbor
 // with the worst distance if the neighbor set is full.
-func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFunc) {
+func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int) {
 	if n.neighbors == nil {
 		n.neighbors = make(map[K]*layerNode[K], m)
 	}
@@ -48,11 +47,11 @@ func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFu
 
 	// Find the neighbor with the worst distance.
 	var (
-		worstDist = float32(math.Inf(-1))
+		worstDist = 0
 		worst     *layerNode[K]
 	)
 	for _, neighbor := range n.neighbors {
-		d := dist(neighbor.Value, n.Value)
+		d := hamming.Bytes(neighbor.Value, n.Value)
 		// d > worstDist may always be false if the distance function
 		// returns NaN, e.g., when the embeddings are zero.
 		if d > worstDist || worst == nil {
@@ -69,7 +68,7 @@ func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFu
 
 type searchCandidate[K cmp.Ordered] struct {
 	node *layerNode[K]
-	dist float32
+	dist int
 }
 
 func (s searchCandidate[K]) Less(o searchCandidate[K]) bool {
@@ -82,8 +81,7 @@ func (n *layerNode[K]) search(
 	// k is the number of candidates in the result set.
 	k int,
 	efSearch int,
-	target Vector,
-	distance DistanceFunc,
+	target BinaryString,
 ) []searchCandidate[K] {
 	// This is a basic greedy algorithm to find the entry point at the given level
 	// that is closest to the target node.
@@ -92,7 +90,7 @@ func (n *layerNode[K]) search(
 	candidates.Push(
 		searchCandidate[K]{
 			node: n,
-			dist: distance(n.Value, target),
+			dist: hamming.Bytes(n.Value, target),
 		},
 	)
 	var (
@@ -122,7 +120,7 @@ func (n *layerNode[K]) search(
 			}
 			visited[neighborID] = true
 
-			dist := distance(neighbor.Value, target)
+			dist := hamming.Bytes(neighbor.Value, target)
 			improved = improved || dist < result.Min().dist
 			if result.Len() < k {
 				result.Push(searchCandidate[K]{node: neighbor, dist: dist})
@@ -165,7 +163,7 @@ func (n *layerNode[K]) replenish(m int) {
 			if candidate == n {
 				continue
 			}
-			n.addNeighbor(candidate, m, CosineDistance)
+			n.addNeighbor(candidate, m)
 			if len(n.neighbors) >= m {
 				return
 			}
@@ -216,9 +214,6 @@ func (l *layer[K]) size() int {
 // All public parameters must be set before adding nodes to the graph.
 // K is cmp.Ordered instead of of comparable so that they can be sorted.
 type Graph[K cmp.Ordered] struct {
-	// Distance is the distance function used to compare embeddings.
-	Distance DistanceFunc
-
 	// Rng is used for level generation. It may be set to a deterministic value
 	// for reproducibility. Note that deterministic number generation can lead to
 	// degenerate graphs when exposed to adversarial inputs.
@@ -251,7 +246,6 @@ func NewGraph[K cmp.Ordered]() *Graph[K] {
 	return &Graph[K]{
 		M:        16,
 		Ml:       0.25,
-		Distance: CosineDistance,
 		EfSearch: 20,
 		Rng:      defaultRand(),
 	}
@@ -301,7 +295,7 @@ func (h *Graph[K]) randomLevel() int {
 	return max
 }
 
-func (g *Graph[K]) assertDims(n Vector) {
+func (g *Graph[K]) assertDims(n BinaryString) {
 	if len(g.layers) == 0 {
 		return
 	}
@@ -372,11 +366,7 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 				searchPoint = layer.nodes[*elevator]
 			}
 
-			if g.Distance == nil {
-				panic("(*Graph).Distance must be set")
-			}
-
-			neighborhood := searchPoint.search(g.M, g.EfSearch, vec, g.Distance)
+			neighborhood := searchPoint.search(g.M, g.EfSearch, vec)
 			if len(neighborhood) == 0 {
 				// This should never happen because the searchPoint itself
 				// should be in the result set.
@@ -394,8 +384,8 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 				layer.nodes[key] = newNode
 				for _, node := range neighborhood {
 					// Create a bi-directional edge between the new node and the best node.
-					node.node.addNeighbor(newNode, g.M, g.Distance)
-					newNode.addNeighbor(node.node, g.M, g.Distance)
+					node.node.addNeighbor(newNode, g.M)
+					newNode.addNeighbor(node.node, g.M)
 				}
 			}
 		}
@@ -408,7 +398,7 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 }
 
 // Search finds the k nearest neighbors from the target node.
-func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
+func (h *Graph[K]) Search(near BinaryString, k int) []Node[K] {
 	h.assertDims(near)
 	if len(h.layers) == 0 {
 		return nil
@@ -428,12 +418,12 @@ func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
 
 		// Descending hierarchies
 		if layer > 0 {
-			nodes := searchPoint.search(1, efSearch, near, h.Distance)
+			nodes := searchPoint.search(1, efSearch, near)
 			elevator = ptr(nodes[0].node.Key)
 			continue
 		}
 
-		nodes := searchPoint.search(k, efSearch, near, h.Distance)
+		nodes := searchPoint.search(k, efSearch, near)
 		out := make([]Node[K], 0, len(nodes))
 
 		for _, node := range nodes {
@@ -477,7 +467,7 @@ func (h *Graph[K]) Delete(key K) bool {
 }
 
 // Lookup returns the vector with the given key.
-func (h *Graph[K]) Lookup(key K) (Vector, bool) {
+func (h *Graph[K]) Lookup(key K) (BinaryString, bool) {
 	if len(h.layers) == 0 {
 		return nil, false
 	}

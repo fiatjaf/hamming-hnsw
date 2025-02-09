@@ -1,15 +1,20 @@
-module github.com/coder/hnsw
+module github.com/fiatjaf/hamming-hnsw
 
 go 1.21.4
 
 require github.com/stretchr/testify v1.9.0
 
-require github.com/google/renameio v1.0.1
+require (
+	github.com/coder/hnsw v0.6.1
+	github.com/google/renameio v1.0.1
+	github.com/skull-squadron/hamming v0.0.0-20180906055917-c99c65617cd3
+	github.com/viterin/vek v0.4.2
+)
 
 require (
 	github.com/chewxy/math32 v1.10.1 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/viterin/partial v1.1.0 // indirect
-	github.com/viterin/vek v0.4.2 // indirect
 	golang.org/x/sys v0.11.0 // indirect
 )
 

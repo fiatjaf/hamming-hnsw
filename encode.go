@@ -44,14 +44,14 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		*v = string(s)
 		return len(s), err
 
-	case *[]float32:
+	case *BinaryString:
 		var ln int
 		_, err := binaryRead(r, &ln)
 		if err != nil {
 			return 0, err
 		}
 
-		*v = make([]float32, ln)
+		*v = make(BinaryString, ln)
 		return binary.Size(*v), binary.Read(r, byteOrder, *v)
 
 	case io.ReaderFrom:
@@ -84,7 +84,7 @@ func binaryWrite(w io.Writer, data any) (int, error) {
 		}
 
 		return n + n2, nil
-	case []float32:
+	case BinaryString:
 		n, err := binaryWrite(w, len(v))
 		if err != nil {
 			return n, err
@@ -131,17 +131,12 @@ const encodingVersion = 1
 //
 // T must implement io.WriterTo.
 func (h *Graph[K]) Export(w io.Writer) error {
-	distFuncName, ok := distanceFuncToName(h.Distance)
-	if !ok {
-		return fmt.Errorf("distance function %v must be registered with RegisterDistanceFunc", h.Distance)
-	}
 	_, err := multiBinaryWrite(
 		w,
 		encodingVersion,
 		h.M,
 		h.Ml,
 		h.EfSearch,
-		distFuncName,
 	)
 	if err != nil {
 		return fmt.Errorf("encode parameters: %w", err)
@@ -189,11 +184,6 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		return err
 	}
 
-	var ok bool
-	h.Distance, ok = distanceFuncs[dist]
-	if !ok {
-		return fmt.Errorf("unknown distance function %q", dist)
-	}
 	if h.Rng == nil {
 		h.Rng = defaultRand()
 	}
@@ -219,7 +209,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		nodes := make(map[K]*layerNode[K], nNodes)
 		for j := 0; j < nNodes; j++ {
 			var key K
-			var vec Vector
+			var vec BinaryString
 			var nNeighbors int
 			_, err = multiBinaryRead(r, &key, &vec, &nNeighbors)
 			if err != nil {
