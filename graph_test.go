@@ -2,6 +2,7 @@ package hnsw
 
 import (
 	"cmp"
+	crand "crypto/rand"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -19,59 +20,9 @@ func Test_maxLevel(t *testing.T) {
 	require.Equal(t, 11, m)
 }
 
-func Test_layerNode_search(t *testing.T) {
-	entry := &layerNode[int]{
-		Node: Node[int]{
-			Value: Vector{0},
-			Key:   0,
-		},
-		neighbors: map[int]*layerNode[int]{
-			1: {
-				Node: Node[int]{
-					Value: Vector{1},
-					Key:   1,
-				},
-			},
-			2: {
-				Node: Node[int]{
-					Value: Vector{2},
-					Key:   2,
-				},
-			},
-			3: {
-				Node: Node[int]{
-					Value: Vector{3},
-					Key:   3,
-				},
-				neighbors: map[int]*layerNode[int]{
-					4: {
-						Node: Node[int]{
-							Value: Vector{4},
-							Key:   5,
-						},
-					},
-					5: {
-						Node: Node[int]{
-							Value: Vector{5},
-							Key:   5,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	best := entry.search(2, 4, BinaryString{4}, EuclideanDistance)
-
-	require.Equal(t, 5, best[0].node.Key)
-	require.Equal(t, 3, best[1].node.Key)
-	require.Len(t, best, 2)
-}
-
 func newTestGraph[K cmp.Ordered]() *Graph[K] {
 	return &Graph[K]{
 		M:        6,
-		Distance: EuclideanDistance,
 		Ml:       0.5,
 		EfSearch: 20,
 		Rng:      rand.New(rand.NewSource(0)),
@@ -87,7 +38,7 @@ func TestGraph_AddSearch(t *testing.T) {
 		g.Add(
 			Node[int]{
 				Key:   i,
-				Value: Vector{float32(i)},
+				Value: BinaryString{byte(i * 212), byte(i * i * i * 177), byte(i * i * 37), byte((1 + i) * 134), byte(i), byte(256 - ((i * 48) % 256))},
 			},
 		)
 	}
@@ -108,21 +59,15 @@ func TestGraph_AddSearch(t *testing.T) {
 	}, al.Topography())
 
 	nearest := g.Search(
-		BinaryString{64.5},
+		BinaryString{16, 72, 244, 8, 53, 18},
 		4,
 	)
 
 	require.Len(t, nearest, 4)
-	require.EqualValues(
-		t,
-		[]Node[int]{
-			{64, Vector{64}},
-			{65, Vector{65}},
-			{62, Vector{62}},
-			{63, Vector{63}},
-		},
-		nearest,
-	)
+	require.Equal(t, nearest[0].Key, 49)
+	require.Equal(t, nearest[1].Key, 33)
+	require.Equal(t, nearest[2].Key, 17)
+	require.Equal(t, nearest[3].Key, 113)
 }
 
 func TestGraph_AddDelete(t *testing.T) {
@@ -132,7 +77,7 @@ func TestGraph_AddDelete(t *testing.T) {
 	for i := 0; i < 128; i++ {
 		g.Add(Node[int]{
 			Key:   i,
-			Value: Vector{float32(i)},
+			Value: BinaryString{byte(i)},
 		})
 	}
 
@@ -173,11 +118,10 @@ func Benchmark_HSNW(b *testing.B) {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
 			g := Graph[int]{}
 			g.Ml = 0.5
-			g.Distance = EuclideanDistance
 			for i := 0; i < size; i++ {
 				g.Add(Node[int]{
 					Key:   i,
-					Value: Vector{float32(i)},
+					Value: BinaryString{byte(i)},
 				})
 			}
 			b.ResetTimer()
@@ -185,7 +129,7 @@ func Benchmark_HSNW(b *testing.B) {
 			b.Run("Search", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					g.Search(
-						BinaryString{float32(i % size)},
+						BinaryString{byte(i % size)},
 						4,
 					)
 				}
@@ -194,11 +138,9 @@ func Benchmark_HSNW(b *testing.B) {
 	}
 }
 
-func randFloats(n int) BinaryString {
+func randBytes(n int) BinaryString {
 	x := make(BinaryString, n)
-	for i := range x {
-		x[i] = rand.Float32()
-	}
+	crand.Read(x)
 	return x
 }
 
@@ -211,7 +153,7 @@ func Benchmark_HNSW_1536(b *testing.B) {
 	for i := 0; i < size; i++ {
 		points[i] = Node[int]{
 			Key:   i,
-			Value: Vector(randFloats(1536)),
+			Value: randBytes(1536),
 		}
 		g.Add(points[i])
 	}
@@ -230,20 +172,20 @@ func Benchmark_HNSW_1536(b *testing.B) {
 func TestGraph_DefaultCosine(t *testing.T) {
 	g := NewGraph[int]()
 	g.Add(
-		Node[int]{Key: 1, Value: Vector{1, 1}},
-		Node[int]{Key: 2, Value: Vector{0, 1}},
-		Node[int]{Key: 3, Value: Vector{1, -1}},
+		Node[int]{Key: 1, Value: BinaryString{1, 1}},
+		Node[int]{Key: 2, Value: BinaryString{0, 1}},
+		Node[int]{Key: 3, Value: BinaryString{1, 0}},
 	)
 
 	neighbors := g.Search(
-		BinaryString{0.5, 0.5},
+		BinaryString{1, 1},
 		1,
 	)
 
 	require.Equal(
 		t,
 		[]Node[int]{
-			{1, Vector{1, 1}},
+			{1, BinaryString{1, 1}},
 		},
 		neighbors,
 	)
